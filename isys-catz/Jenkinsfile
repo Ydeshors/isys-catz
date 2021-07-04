@@ -1,0 +1,51 @@
+pipeline {
+    agent any
+    environment {
+      registry = 'isyscatz.jfrog.io/default-docker-virtual/'
+      registryCredential = 'artifactory'
+      dockerImage = ''
+      CLOUDSDK_CONFIG = "${env.WORKSPACE}"
+    }
+    stages {
+        stage('Test') {
+          steps {
+            dir("./isys-catz") {
+              withGradle {
+                sh "./gradlew test"
+              }
+            }
+          }
+        }
+        stage('Building image') {
+          steps{
+            dir("./isys-catz"){
+              script {
+                dockerImage = docker.build "${registry}isyscatz:$BUILD_NUMBER"
+              }   
+            } 
+          }
+        }
+        stage('Deploy Image') {
+          steps{
+            script {
+              withCredentials([usernamePassword( credentialsId: 'artifactory', usernameVariable: 'USER', passwordVariable: 'PASSWORD')]) {
+        sh "docker login -u $USER -p $PASSWORD ${registry}"
+        sh "docker push ${registry}isyscatz:$BUILD_NUMBER"
+              }    
+            } 
+          }
+       }
+       stage ('Kubernetes deployment') {
+         steps {
+           withCredentials([file(credentialsId: 'key-sa', variable: 'GOOGLE_AUTH')]) {
+             script {
+               docker.image('google/cloud-sdk:latest').inside {
+                 sh "gcloud auth activate-service-account --key-file=${GOOGLE_AUTH}"
+                 sh "gcloud container clusters get-credentials isys-catz-kube --zone europe-central2-a --project hazel-circlet-319012"
+               }
+             }
+          }
+        }    
+      }  
+  }      
+}
